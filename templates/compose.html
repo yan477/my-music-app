@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>哼唱转谱</title>
+</head>
+<body>
+    <h1>哼唱转谱</h1>
+    <p>点击“开始录音”，录制一段旋律；然后点击“完成并转换”，生成简易五线谱。</p>
+
+    <button id="startBtn">开始录音</button>
+    <button id="stopBtn" disabled>停止录音</button>
+    <button id="uploadBtn" disabled>完成并转换</button>
+
+    <p id="status" style="color:blue;"></p>
+
+    <div id="score"></div>
+
+    <script src="https://unpkg.com/vexflow/releases/vexflow-min.js"></script>
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const status = document.getElementById('status');
+        const score = document.getElementById('score');
+
+        startBtn.addEventListener('click', async () => {
+            status.textContent = '正在录音...';
+            audioChunks = [];
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            uploadBtn.disabled = true;
+        });
+
+        stopBtn.addEventListener('click', () => {
+            mediaRecorder.stop();
+            status.textContent = '录音已停止，请点击“完成并转换”。';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            uploadBtn.disabled = false;
+        });
+
+        uploadBtn.addEventListener('click', async () => {
+            status.textContent = '正在生成谱面，请稍候...';
+            uploadBtn.disabled = true;
+            const blob = new Blob(audioChunks, { type: 'audio/wav' });
+            const fd = new FormData();
+            fd.append('audio', blob, 'melody.wav');
+            try {
+                const res = await fetch('/analyze_melody', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.error) {
+                    status.textContent = '分析失败：' + data.error;
+                    return;
+                }
+                status.textContent = '生成完成。';
+                renderScore(data);
+            } catch (e) {
+                status.textContent = '网络错误：' + e;
+            }
+            uploadBtn.disabled = false;
+        });
+
+        function renderScore(data) {
+            score.innerHTML = '';
+            const VF = Vex.Flow;
+            const div = document.createElement('div');
+            score.appendChild(div);
+
+            const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+            renderer.resize(800, 200);
+            const context = renderer.getContext();
+            const stave = new VF.Stave(10, 40, 780);
+            stave.addClef('treble').addTimeSignature('4/4');
+            stave.setContext(context).draw();
+
+            const notes = data.notes.map(n => {
+                if (n.pitch === 'rest') {
+                    return new VF.StaveNote({ clef: 'treble', keys: ['b/4'], duration: 'q' }).addModifier(new VF.Annotation('rest'), 0);
+                }
+                const key = n.pitch.replace(' ', '');
+                return new VF.StaveNote({ clef: 'treble', keys: [key.toLowerCase()], duration: 'q' });
+            });
+
+            const voice = new VF.Voice({ num_beats: notes.length, beat_value: 4 });
+            voice.addTickables(notes);
+            new VF.Formatter().joinVoices([voice]).format([voice], 700);
+            voice.draw(context, stave);
+        }
+    </script>
+</body>
+</html>

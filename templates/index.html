@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>发型迁移Demo</title>
+</head>
+<body>
+    <h1>发型迁移Demo</h1>
+    <p><a href="/compose">去哼唱转谱（创作空间）</a></p>
+    <p style="color:darkred;">首次使用需要下载AI模型（约5GB），可能需要几分钟。建议先点击“预加载模型”并等待完成，再进行照片上传。</p>
+    <button id="preloadButton">预加载模型</button>
+    <br><br>
+    <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+        <label for="source">源照片（人脸）:</label>
+        <input type="file" name="source" accept="image/*" required><br><br>
+        
+        <label for="reference">参考发型:</label>
+        <input type="file" name="reference" accept="image/*" required><br><br>
+        
+        <input id="submitButton" type="submit" value="合成发型">
+    </form>
+    <p id="status" style="color:blue;"></p>
+    <script>
+        const form = document.getElementById('uploadForm');
+        const status = document.getElementById('status');
+        const button = document.getElementById('submitButton');
+        form.addEventListener('submit', function() {
+            button.disabled = true;
+            status.textContent = '正在上传并合成，请耐心等待…';
+        });
+
+        const preloadBtn = document.getElementById('preloadButton');
+        preloadBtn.addEventListener('click', () => {
+            preloadBtn.disabled = true;
+            status.textContent = '开始下载模型，请耐心等待...';
+            fetch('/load_model')
+                .then(resp => resp.text())
+                .then(txt => {
+                    status.textContent = txt;
+                    preloadBtn.disabled = false;
+                })
+                .catch(err => {
+                    status.textContent = '预加载失败：' + err;
+                    preloadBtn.disabled = false;
+                });
+        });
+    </script>
+</body>
+</html>

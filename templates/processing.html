@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>正在处理</title>
+</head>
+<body>
+    <h1>正在合成发型，请稍候...</h1>
+    <p id="statusMsg">处理进度: <span id="status">处理中</span></p>
+    <script>
+        const jobId = "{{ job_id }}";
+        function checkStatus() {
+            fetch(`/status/${jobId}`)
+                .then(resp => resp.json())
+                .then(data => {
+                    if (data.status === 'done') {
+                        window.location.href = `/results/${data.result}`;
+                    } else if (data.status === 'error') {
+                        document.getElementById('status').textContent = '出错';
+                        alert('处理失败: ' + data.error);
+                    } else {
+                        document.getElementById('status').textContent = data.status;
+                        setTimeout(checkStatus, 2000);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    setTimeout(checkStatus, 5000);
+                });
+        }
+        checkStatus();
+    </script>
+</body>
+</html>
