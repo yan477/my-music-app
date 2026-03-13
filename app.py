@@ -1,15 +1,21 @@
 from flask import Flask, request, render_template, send_from_directory
 import os
 from PIL import Image
-import torch
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
-from diffusers.utils import load_image
 import cv2
 import numpy as np
 import librosa
 import music21
 import threading
 import uuid
+
+# Optional heavy dependencies (used only if available)
+try:
+    import torch
+    from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+except Exception:
+    torch = None
+    StableDiffusionControlNetPipeline = None
+    ControlNetModel = None
 
 # dictionary to track job statuses
 jobs = {}
@@ -28,20 +34,26 @@ controlnet = None
 
 def load_model():
     global pipe, controlnet
-    if pipe is None:
-        print("Loading AI model...")
-        try:
-            controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", torch_dtype=torch.float16)
-            pipe = StableDiffusionControlNetPipeline.from_pretrained(
-                "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
-            )
-            from diffusers import UniPCMultistepScheduler
-            pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
-            pipe.enable_model_cpu_offload()
-            print("Model loaded!")
-        except Exception as e:
-            print(f"Model loading failed: {e}")
-            pipe = None
+    if pipe is not None:
+        return
+    # Try to load AI model if available; if dependencies missing or it fails, keep fallback mode
+    if StableDiffusionControlNetPipeline is None:
+        print("Diffusers not installed; will use fallback image blend.")
+        return
+
+    print("Loading AI model...")
+    try:
+        controlnet = ControlNetModel.from_pretrained("lllyasviel/sd-controlnet-canny", torch_dtype=torch.float16)
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
+        )
+        from diffusers import UniPCMultistepScheduler
+        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+        pipe.enable_model_cpu_offload()
+        print("Model loaded!")
+    except Exception as e:
+        print(f"Model loading failed: {e}")
+        pipe = None
 
 @app.route('/')
 def index():
@@ -132,6 +144,20 @@ def analyze_melody():
         return {'error': str(e)}
 
 
+def fallback_blend(source_path, reference_path):
+    """Simple image blend used when AI model is unavailable."""
+    source = cv2.imread(source_path)
+    reference = cv2.imread(reference_path)
+    target_size = (512, 512)
+    source = cv2.resize(source, target_size)
+    reference = cv2.resize(reference, target_size)
+    blended = cv2.addWeighted(source, 0.7, reference, 0.3, 0)
+
+    result_path = os.path.join(app.config['RESULT_FOLDER'], 'result.jpg')
+    cv2.imwrite(result_path, blended)
+    return 'result.jpg'
+
+
 def process_images(source_path, reference_path):
     # Load model if not loaded
     load_model()
@@ -139,15 +165,7 @@ def process_images(source_path, reference_path):
     if pipe is None:
         # Fallback to simple blend if model failed
         print("Using simple image blend as fallback")
-        source = cv2.imread(source_path)
-        reference = cv2.imread(reference_path)
-        target_size = (512, 512)
-        source = cv2.resize(source, target_size)
-        reference = cv2.resize(reference, target_size)
-        blended = cv2.addWeighted(source, 0.7, reference, 0.3, 0)
-        result_path = os.path.join(app.config['RESULT_FOLDER'], 'result.jpg')
-        cv2.imwrite(result_path, blended)
-        return 'result.jpg'
+        return fallback_blend(source_path, reference_path)
     
     # AI-powered hairstyle transfer using ControlNet
     
@@ -166,14 +184,18 @@ def process_images(source_path, reference_path):
     negative_prompt = "blurry, low quality, distorted face"
     
     # Generate new image
-    generator = torch.Generator(device="cpu").manual_seed(42)
-    output = pipe(
-        prompt,
-        image=control_image,
-        num_inference_steps=20,
-        generator=generator,
-        negative_prompt=negative_prompt
-    )
+    try:
+        generator = torch.Generator(device="cpu").manual_seed(42) if torch is not None else None
+        output = pipe(
+            prompt,
+            image=control_image,
+            num_inference_steps=20,
+            generator=generator,
+            negative_prompt=negative_prompt
+        )
+    except Exception as e:
+        print(f"AI generation failed: {e}")
+        return fallback_blend(source_path, reference_path)
     
     # Save result
     result_image = output.images[0]
